@@ -122,10 +122,17 @@
  * wrapCallback, but there are other examples such as `Promises` where the `then` wrapCallback is
  * wrapped, but the execution of `then` in triggered by `Promise` scheduling `resolve` work.
  *
- * 除了包裹回调来重新建立zone之外，
+ * 除了包裹回调来重新建立zone之外，导致后期工作调度的所有操作都将通过当前区域进行路由，
+ * 该区域允许通过在wrapCallback之前或之后添加工作来截获它们，并使用不同的实现请求的方法。
+ * （用于单元测试或跟踪请求）
+ * 在一些如“setTimeout”的实例方法中，包裹的wrapCallback和调度在相同的wrapCallback中完成，
+ * 但是像“Promises”的实例方法，“then”的wrapCallback被包裹，“then”中执行的代码，调度在“resolve”中
  *
  *
  * Fundamentally there are three kinds of tasks which can be scheduled:
+ *
+ * 从根本上说，有三种可以安排的任务：
+ *
  *
  * 1. [MicroTask] used for doing work right after the current task. This is non-cancelable which is
  *    guaranteed to run exactly once and immediately.
@@ -134,7 +141,13 @@
  * 3. [EventTask] used for listening on some future event. This may execute zero or more times, with
  *    an unknown delay.
  *
+ * 1. [MicroTask] 用于在当前任务之后work。 这是不可取消的，保证运行一次并立即
+ * 2. [MacroTask] 用于延时的work。如`setTimeout`。 这通常是可取消的，这被保证在一些很好理解的延迟之后至少执行一次
+ * 3. [EventTask] 监听一些未来的事件。这可能会执行零次或多次，未知的延迟
+ *
  * Each asynchronous API is modeled and routed through one of these APIs.
+ *
+ * 每个异步API都通过其中一个API进行建模和路由
  *
  *
  * ### [MicroTask]
@@ -142,6 +155,7 @@
  * [MicroTask]s represent work which will be done in current VM turn as soon as possible, before VM
  * yielding.
  *
+ * [MicroTask]s 表示那些在VM执行前，很快就在当前VM运行完成的代码
  *
  * ### [TimerTask]
  *
@@ -150,6 +164,9 @@
  * `setTimeout`, `setImmediate`, `setInterval`, `requestAnimationFrame`, and all browser specif
  * variants.
  *
+ * [TimerTask]s 代表在一些延时之后，运行完成的代码（有时，延迟是近似值，例如下一个可用的动画业务）。
+ * 通常这些方法包括：`setTimeout`, `setImmediate`, `setInterval`, `requestAnimationFrame` 和所有浏览器自己的前缀变种
+ *
  *
  * ### [EventTask]
  *
@@ -157,38 +174,59 @@
  * events may never be executed, but typically execute more than once. There is no queue of
  * events, rather their callbacks are unpredictable both in order and time.
  *
+ * [EventTask]s 表示在事件上创建侦听器的请求。与其他任务不同，事件可能永远不会被执行，但通常执行不止一次。
+ * 没有事件排队，但是他们的回调在顺序和时间上是不可预测的
  *
  * ## Global Error Handling
+ *
+ * ## Global 错误处理
  *
  *
  * ## Composability
  *
+ * ## 组合性
+ *
+ *
  * Zones can be composed together through [Zone.fork()]. A child zone may create its own set of
  * rules. A child zone is expected to either:
+ *
+ * Zones 可以通过 [Zone.fork()] 进行合并。子zone可以创建自己的一套规则。一个子zone将会执行下面其中一条：
+ *
  *
  * 1. Delegate the interception to a parent zone, and optionally add before and after wrapCallback
  *    hook.s
  * 2) Or process the request itself without delegation.
  *
+ * 1. 将拦截委托给父zone，并且可选地在wrapCallback hook.s之前和之后添加
+ *
+ * 2. 不委托父zone直接处理
+ *
  * Composability allows zones to keep their concerns clean. For example a top most zone may chose
  * to handle error handling, while child zones may chose to do user action tracking.
  *
+ * 可组合性允许zones互不干涉。 例如，最顶层的zone可能会选择处理错误处理，而子zone可能会选择进行用户操作跟踪
+ *
  *
  * ## Root Zone
+ *
+ * ## 根Zone
+ *
  *
  * At the start the browser will run in a special root zone, which is configure to behave exactly
  * like the platform, making any existing code which is not-zone aware behave as expected. All
  * zones are children of the root zone.
  *
+ * 一开始，浏览器将运行在一个特殊的根zone，该zone被配置为与该平台完全相似，使任何不区分zone的现有代码的行为与预期的一致。 所有zone都是根zone的子zone。
+ *
  */
 interface Zone {
   /**
    *
-   * @returns {Zone} The parent Zone.
+   * @returns {Zone} The parent Zone. // 父级zone
    */
   parent: Zone;
   /**
-   * @returns {string} The Zone name (useful for debugging)
+   * @returns {string} The Zone name (useful for debugging) // zone名，调试时候用
    */
   name: string;
 
@@ -197,6 +235,11 @@ interface Zone {
    *
    * If the current zone does not have a key, the request is delegated to the parent zone. Use
    * [ZoneSpec.properties] to configure the set of properties associated with the current zone.
+   *
+   *
+   * 返回 “key” 相关的 值。
+   * 如果当前zone没有key，请求会委托给父级zone。
+   * 用 [ZoneSpec.properties] 去配置与当前区域相关联的一组属性
    *
    * @param key The key to retrieve.
    * @returns {any} The value for the key, or `undefined` if not found.
